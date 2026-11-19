@@ -1,0 +1,551 @@
+
+name: Criar MAPEADOR 2.0 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Baixar projeto
+        uses: actions/checkout@v4
+
+      - name: Configurar Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Configurar Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Configurar Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Criar estrutura do aplicativo
+        run: |
+          mkdir -p app/src/main/java/com/mapeador/app
+          mkdir -p app/src/main/res/xml
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+          rootProject.name = "MAPEADOR-2.0"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.5.2" apply false
+              id("org.jetbrains.kotlin.android") version "1.9.24" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.mapeador.app"
+              compileSdk = 34
+
+              defaultConfig {
+                  applicationId = "com.mapeador.app"
+                  minSdk = 26
+                  targetSdk = 34
+                  versionCode = 1
+                  versionName = "2.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <application
+                  android:allowBackup="true"
+                  android:label="MAPEADOR 2.0"
+                  android:theme="@android:style/Theme.Material.Light.NoActionBar"
+                  android:usesCleartextTraffic="false">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+                  </activity>
+
+                  <service
+                      android:name=".MapService"
+                      android:label="MAPEADOR 2.0"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+                      android:exported="true">
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_config" />
+                  </service>
+
+              </application>
+          </manifest>
+          EOF
+
+          cat > app/src/main/res/xml/accessibility_config.xml <<'EOF'
+          <accessibility-service
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:description="@string/accessibility_description"
+              android:accessibilityEventTypes="typeAllMask"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:canPerformGestures="true"
+              android:canRetrieveWindowContent="false"
+              android:accessibilityFlags="flagRequestFilterKeyEvents"
+              android:notificationTimeout="50" />
+          EOF
+
+          mkdir -p app/src/main/res/values
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">MAPEADOR 2.0</string>
+              <string name="accessibility_description">Serviço de mapeamento de teclas do MAPEADOR 2.0.</string>
+          </resources>
+          EOF
+
+          cat > app/src/main/java/com/mapeador/app/MainActivity.kt <<'EOF'
+          package com.mapeador.app
+
+          import android.app.Activity
+          import android.os.Bundle
+          import android.content.Intent
+          import android.provider.Settings
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.view.Gravity
+          import android.view.View
+          import android.widget.*
+          import android.content.Context
+
+          class MainActivity : Activity() {
+
+              private val purple = Color.rgb(164, 82, 255)
+              private val background = Color.rgb(12, 10, 19)
+              private val prefs by lazy {
+                  getSharedPreferences("mapeador", Context.MODE_PRIVATE)
+              }
+
+              private lateinit var keyInput: EditText
+              private lateinit var xInput: EditText
+              private lateinit var yInput: EditText
+              private lateinit var status: TextView
+
+              override fun onCreate(savedInstanceState: Bundle?) {
+                  super.onCreate(savedInstanceState)
+                  buildScreen()
+              }
+
+              private fun buildScreen() {
+                  val scroll = ScrollView(this)
+                  scroll.setBackgroundColor(background)
+
+                  val root = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(24, 35, 24, 30)
+                  }
+
+                  val logo = TextView(this).apply {
+                      text = "◈ MAPEADOR"
+                      textSize = 30f
+                      setTextColor(purple)
+                      typeface = Typeface.DEFAULT_BOLD
+                      gravity = Gravity.CENTER
+                  }
+                  root.addView(logo)
+
+                  val version = TextView(this).apply {
+                      text = "2.0  •  GAME MAPPING SYSTEM"
+                      textSize = 11f
+                      setTextColor(Color.LTGRAY)
+                      gravity = Gravity.CENTER
+                  }
+                  root.addView(version)
+
+                  root.addView(space(25))
+
+                  val card = TextView(this).apply {
+                      text = "PAINEL DE CONTROLE"
+                      textSize = 18f
+                      typeface = Typeface.DEFAULT_BOLD
+                      setTextColor(Color.WHITE)
+                  }
+                  root.addView(card)
+
+                  status = TextView(this).apply {
+                      text = "● CONFIGURAÇÃO LOCAL"
+                      textSize = 13f
+                      setTextColor(purple)
+                      setPadding(0, 15, 0, 15)
+                  }
+                  root.addView(status)
+
+                  root.addView(section("MAPEAMENTO DE TECLAS"))
+
+                  keyInput = field("Tecla que será utilizada")
+                  keyInput.setText(prefs.getString("map_key", "SPACE"))
+                  root.addView(keyInput)
+
+                  root.addView(space(10))
+
+                  root.addView(section("POSIÇÃO DO TOQUE NA TELA"))
+
+                  xInput = field("Posição horizontal (X)")
+                  xInput.setText(prefs.getInt("map_x", 500).toString())
+                  root.addView(xInput)
+
+                  yInput = field("Posição vertical (Y)")
+                  yInput.setText(prefs.getInt("map_y", 900).toString())
+                  root.addView(yInput)
+
+                  root.addView(space(12))
+
+                  root.addView(actionButton("SALVAR CONFIGURAÇÕES") {
+                      saveSettings()
+                  })
+
+                  root.addView(space(12))
+
+                  root.addView(actionButton("ATIVAR ACESSIBILIDADE") {
+                      startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                  })
+
+                  root.addView(space(12))
+
+                  root.addView(actionButton("VERIFICAR CONFIGURAÇÃO") {
+                      val enabled = MapService.isEnabled(this)
+                      status.text = if (enabled)
+                          "● SERVIÇO ATIVADO"
+                      else
+                          "● SERVIÇO DESATIVADO"
+                      status.setTextColor(if (enabled) Color.GREEN else Color.YELLOW)
+                  })
+
+                  root.addView(space(24))
+                  root.addView(section("RECURSOS DO MAPEADOR"))
+
+                  val features = listOf(
+                      "• Configuração de teclas",
+                      "• Coordenadas personalizadas",
+                      "• Botão flutuante de acesso",
+                      "• Atalho F8 para ligar/desligar",
+                      "• Interface gamer roxa",
+                      "• Configurações salvas no aparelho"
+                  )
+
+                  features.forEach {
+                      val item = TextView(this).apply {
+                          text = it
+                          textSize = 14f
+                          setTextColor(Color.LTGRAY)
+                          setPadding(5, 9, 5, 9)
+                      }
+                      root.addView(item)
+                  }
+
+                  root.addView(space(25))
+
+                  val footer = TextView(this).apply {
+                      text = "MAPEADOR 2.0\nDesenvolvido para jogadores."
+                      gravity = Gravity.CENTER
+                      setTextColor(purple)
+                      textSize = 12f
+                  }
+                  root.addView(footer)
+
+                  scroll.addView(root)
+                  setContentView(scroll)
+              }
+
+              private fun saveSettings() {
+                  val key = keyInput.text.toString().trim().uppercase()
+                  val x = xInput.text.toString().toIntOrNull()
+                  val y = yInput.text.toString().toIntOrNull()
+
+                  if (key.isEmpty() || x == null || y == null || x < 0 || y < 0) {
+                      Toast.makeText(this, "Confira os campos preenchidos.", Toast.LENGTH_LONG).show()
+                      return
+                  }
+
+                  prefs.edit()
+                      .putString("map_key", key)
+                      .putInt("map_x", x)
+                      .putInt("map_y", y)
+                      .apply()
+
+                  Toast.makeText(this, "Configurações salvas!", Toast.LENGTH_SHORT).show()
+                  status.text = "● CONFIGURAÇÕES SALVAS"
+              }
+
+              private fun field(hintText: String): EditText {
+                  return EditText(this).apply {
+                      hint = hintText
+                      setHintTextColor(Color.GRAY)
+                      setTextColor(Color.WHITE)
+                      textSize = 15f
+                      setSingleLine(true)
+                      setPadding(16, 12, 16, 12)
+                      setBackgroundColor(Color.rgb(35, 29, 47))
+                  }
+              }
+
+              private fun section(text: String): TextView {
+                  return TextView(this).apply {
+                      this.text = text
+                      textSize = 13f
+                      typeface = Typeface.DEFAULT_BOLD
+                      setTextColor(purple)
+                      setPadding(0, 14, 0, 12)
+                  }
+              }
+
+              private fun actionButton(text: String, action: () -> Unit): Button {
+                  return Button(this).apply {
+                      this.text = text
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(Color.rgb(105, 48, 170))
+                      textSize = 13f
+                      setOnClickListener { action() }
+                  }
+              }
+
+              private fun space(height: Int): View {
+                  return View(this).apply {
+                      layoutParams = LinearLayout.LayoutParams(1, height)
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/mapeador/app/MapService.kt <<'EOF'
+          package com.mapeador.app
+
+          import android.accessibilityservice.AccessibilityService
+          import android.accessibilityservice.GestureDescription
+          import android.graphics.Path
+          import android.graphics.PixelFormat
+          import android.content.Context
+          import android.graphics.Color
+          import android.graphics.Typeface
+          import android.view.Gravity
+          import android.view.KeyEvent
+          import android.view.MotionEvent
+          import android.view.WindowManager
+          import android.widget.TextView
+          import android.widget.Toast
+          import android.view.accessibility.AccessibilityEvent
+
+          class MapService : AccessibilityService() {
+
+              private var floatingButton: TextView? = null
+              private var windowManager: WindowManager? = null
+              private var enabled = true
+              private var startX = 0
+              private var startY = 0
+              private var touchX = 0f
+              private var touchY = 0f
+
+              private val prefs by lazy {
+                  getSharedPreferences("mapeador", Context.MODE_PRIVATE)
+              }
+
+              override fun onServiceConnected() {
+                  super.onServiceConnected()
+                  windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
+                  showFloatingButton()
+              }
+
+              override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+                  // Não lê conteúdo das telas.
+              }
+
+              override fun onInterrupt() {
+                  removeFloatingButton()
+              }
+
+              override fun onKeyEvent(event: KeyEvent): Boolean {
+                  if (event.action != KeyEvent.ACTION_DOWN || event.repeatCount > 0) {
+                      return false
+                  }
+
+                  if (event.keyCode == KeyEvent.KEYCODE_F8) {
+                      enabled = !enabled
+                      Toast.makeText(
+                          this,
+                          if (enabled) "MAPEADOR ATIVADO" else "MAPEADOR DESATIVADO",
+                          Toast.LENGTH_SHORT
+                      ).show()
+                      return true
+                  }
+
+                  if (!enabled) return false
+
+                  val configuredKey = prefs.getString("map_key", "SPACE") ?: "SPACE"
+                  val configuredCode = keyCodeFromName(configuredKey)
+
+                  if (event.keyCode == configuredCode && configuredCode != KeyEvent.KEYCODE_UNKNOWN) {
+                      performMappedTap()
+                      return true
+                  }
+
+                  return false
+              }
+
+              private fun keyCodeFromName(name: String): Int {
+                  return when (name.uppercase()) {
+                      "SPACE" -> KeyEvent.KEYCODE_SPACE
+                      "W" -> KeyEvent.KEYCODE_W
+                      "A" -> KeyEvent.KEYCODE_A
+                      "S" -> KeyEvent.KEYCODE_S
+                      "D" -> KeyEvent.KEYCODE_D
+                      "E" -> KeyEvent.KEYCODE_E
+                      "R" -> KeyEvent.KEYCODE_R
+                      "F" -> KeyEvent.KEYCODE_F
+                      "Q" -> KeyEvent.KEYCODE_Q
+                      "G" -> KeyEvent.KEYCODE_G
+                      "SHIFT" -> KeyEvent.KEYCODE_SHIFT_LEFT
+                      "CTRL" -> KeyEvent.KEYCODE_CTRL_LEFT
+                      "ENTER" -> KeyEvent.KEYCODE_ENTER
+                      "TAB" -> KeyEvent.KEYCODE_TAB
+                      else -> KeyEvent.KEYCODE_UNKNOWN
+                  }
+              }
+
+              private fun performMappedTap() {
+                  val x = prefs.getInt("map_x", 500).toFloat()
+                  val y = prefs.getInt("map_y", 900).toFloat()
+
+                  val path = Path().apply {
+                      moveTo(x, y)
+                  }
+
+                  val gesture = GestureDescription.Builder()
+                      .addStroke(GestureDescription.StrokeDescription(path, 0, 70))
+                      .build()
+
+                  dispatchGesture(gesture, null, null)
+              }
+
+              private fun showFloatingButton() {
+                  if (floatingButton != null) return
+
+                  val button = TextView(this).apply {
+                      text = "M"
+                      textSize = 20f
+                      typeface = Typeface.DEFAULT_BOLD
+                      gravity = Gravity.CENTER
+                      setTextColor(Color.WHITE)
+                      setBackgroundColor(Color.rgb(112, 48, 190))
+                      elevation = 12f
+                  }
+
+                  val params = WindowManager.LayoutParams(
+                      58,
+                      58,
+                      WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+                      WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+                      PixelFormat.TRANSLUCENT
+                  ).apply {
+                      gravity = Gravity.TOP or Gravity.START
+                      x = 20
+                      y = 250
+                  }
+
+                  button.setOnTouchListener { view, event ->
+                      when (event.action) {
+                          MotionEvent.ACTION_DOWN -> {
+                              startX = params.x
+                              startY = params.y
+                              touchX = event.rawX
+                              touchY = event.rawY
+                              true
+                          }
+
+                          MotionEvent.ACTION_MOVE -> {
+                              params.x = startX + (event.rawX - touchX).toInt()
+                              params.y = startY + (event.rawY - touchY).toInt()
+                              windowManager?.updateViewLayout(view, params)
+                              true
+                          }
+
+                          MotionEvent.ACTION_UP -> {
+                              val moved = kotlin.math.abs(event.rawX - touchX) +
+                                  kotlin.math.abs(event.rawY - touchY)
+                              if (moved < 12f) {
+                                  Toast.makeText(
+                                      this,
+                                      "MAPEADOR 2.0 • F8 liga/desliga",
+                                      Toast.LENGTH_SHORT
+                                  ).show()
+                              }
+                              true
+                          }
+
+                          else -> false
+                      }
+                  }
+
+                  floatingButton = button
+                  try {
+                      windowManager?.addView(button, params)
+                  } catch (_: Exception) {
+                      floatingButton = null
+                  }
+              }
+
+              pr
